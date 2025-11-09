@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Just a Minute (JAM) Speaking Challenge</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { margin:0; font-family: 'Segoe UI', sans-serif; display:flex; align-items:center; justify-content:center; height:100vh;
+           background: linear-gradient(135deg,#c8f7d6,#a3e9a6); }
+    .card { width:520px; background:#f9fff9; border-radius:18px; padding:28px; box-shadow:0 10px 30px rgba(0,0,0,0.12); text-align:center; }
+    h2 { margin:0 0 16px; font-size:22px; }
+    .topic { font-size:18px; color:#333; margin-bottom:16px; font-weight:500; }
+    .timer { font-size:16px; color:#d9534f; margin-bottom:12px; }
+    .controls { display:flex; gap:12px; justify-content:center; margin-bottom:12px; }
+    button { background:#6ad07a; border:none; padding:10px 18px; border-radius:24px; cursor:pointer; font-weight:600; }
+    .secondary { background:#9be8a6; }
+    .status { color:#333; margin-top:8px; min-height:2.8em; }
+    .small { font-size:13px; color:#666; margin-top:6px; }
+    pre { text-align:left; white-space:pre-wrap; word-break:break-word; background:#f1f6f1; padding:10px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🎤 Just a Minute (JAM) Speaking Challenge</h2>
+    <div id="topicBox" class="topic"></div>
+    <div id="timerDisplay" class="timer"></div>
+    <div class="controls">
+      <button id="speakBtn">🎙 Speak Now</button>
+      <button id="startBtn">🚀 Start Preparation</button>
+      <button id="nextBtn" class="secondary">Next Topic 🔁</button>
+    </div>
+    <div id="result" class="status"></div>
+    <div class="small">Tip: Open DevTools → Network to inspect API requests. Microphone requires HTTPS or localhost.</div>
+    <div id="debug" style="display:none"><pre id="debugPre"></pre></div>
+  </div>
+<script>
+/*
+ Robust topic loader:
+  - Uses predefined topics with keywords
+  - Stores a pool in localStorage
+  - Falls back to embedded list
+*/
+const POOL_KEY = 'jam_topic_pool_v1';
+const POOL_SIZE = 8;
+const fallbackTopics = [
+  { topic: "Your favorite hobby", keywords: ["hobby", "favorite", "activity", "enjoy", "pastime", "interest", "fun"] },
+  { topic: "Why you love traveling", keywords: ["travel", "journey", "explore", "adventure", "destination", "culture", "trip"] },
+  { topic: "The importance of teamwork", keywords: ["team", "teamwork", "collaboration", "group", "cooperation", "together"] },
+  { topic: "Your favorite book", keywords: ["book", "read", "story", "novel", "author", "literature", "favorite"] },
+  { topic: "The impact of technology", keywords: ["technology", "tech", "innovation", "digital", "modern", "device", "internet"] },
+  { topic: "A memorable childhood moment", keywords: ["childhood", "memory", "moment", "kid", "young", "remember", "experience"] },
+  { topic: "Why health is important", keywords: ["health", "healthy", "fitness", "wellness", "exercise", "diet", "well-being"] },
+  { topic: "Your dream career", keywords: ["career", "job", "dream", "profession", "work", "goal", "aspiration"] }
+];
+let pool = [];
+let currentTopic = null; // { topic: string, keywords: string[] }
+let preparationTimer = null;
+let recordingTimer = null;
+const topicBox = document.getElementById('topicBox');
+const timerDisplay = document.getElementById('timerDisplay');
+const resultDiv = document.getElementById('result');
+const debugPre = document.getElementById('debugPre');
+const speakBtn = document.getElementById('speakBtn');
+const startBtn = document.getElementById('startBtn');
+document.getElementById('nextBtn').addEventListener('click', loadTopic);
+startBtn.addEventListener('click', startPreparation);
+speakBtn.addEventListener('click', startSpeaking);
+init();
+async function init() {
+  const stored = localStorage.getItem(POOL_KEY);
+  if (stored) {
+    try { pool = JSON.parse(stored); } catch(e) { pool = []; }
+  }
+  if (!pool || pool.length < 1) {
+    pool = [...fallbackTopics];
+    localStorage.setItem(POOL_KEY, JSON.stringify(pool));
+    logDebug('Initialized pool with ' + pool.length + ' topics');
+  }
+  loadTopic();
+}
+async function loadTopic() {
+  clearTimers();
+  resultDiv.textContent = '';
+  timerDisplay.textContent = '';
+  topicBox.textContent = '';
+  speakBtn.disabled = true;
+  startBtn.disabled = false;
+  try {
+    if (pool.length === 0) {
+      pool = [...fallbackTopics];
+    }
+    currentTopic = pool.shift();
+    pool.push(currentTopic);
+    localStorage.setItem(POOL_KEY, JSON.stringify(pool));
+    topicBox.textContent = currentTopic.topic;
+    resultDiv.textContent = 'New topic loaded. Click Start Preparation to begin.';
+    return;
+  } catch (err) {
+    console.error('loadTopic error:', err);
+  }
+  currentTopic = fallbackTopics[Math.floor(Math.random() * fallbackTopics.length)];
+  topicBox.textContent = currentTopic.topic;
+  resultDiv.textContent = 'New topic loaded. Click Start Preparation to begin.';
+}
+function startPreparation() {
+  if (!currentTopic) {
+    resultDiv.textContent = 'No topic loaded. Click Next Topic.';
+    return;
+  }
+  clearTimers();
+  let timeLeft = 60; // 1 minute preparation
+  timerDisplay.textContent = `Preparation Time: ${timeLeft} seconds`;
+  startBtn.disabled = true;
+  speakBtn.disabled = false;
+  preparationTimer = setInterval(() => {
+    timeLeft--;
+    timerDisplay.textContent = `Preparation Time: ${timeLeft} seconds`;
+    if (timeLeft <= 0) {
+      clearInterval(preparationTimer);
+      timerDisplay.textContent = '';
+      resultDiv.textContent = 'Preparation time over. Click Speak Now to talk for 1 minute.';
+    }
+  }, 1000);
+  resultDiv.textContent = 'Prepare your thoughts for 1 minute!';
+}
+function startSpeaking() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert('Speech Recognition not supported. Use Chrome/Edge on desktop.');
+    resultDiv.textContent = 'Speech Recognition not supported. Use Chrome/Edge on desktop.';
+    return;
+  }
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+    console.warn('Not secure origin — microphone permissions may be blocked.');
+    resultDiv.textContent = 'Note: For consistent microphone access use HTTPS or localhost.';
+    return;
+  }
+  clearTimers();
+  window.speechSynthesis.cancel(); // Stop any speech synthesis
+  resultDiv.textContent = 'Speaking… Talk about the topic for 1 minute.';
+  timerDisplay.textContent = 'Speaking Time: 60 seconds';
+  let timeLeft = 60; // 1 minute speaking
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.start();
+  recordingTimer = setTimeout(() => {
+    recognition.stop();
+    timerDisplay.textContent = '';
+    resultDiv.textContent = 'Recording stopped. Analyzing…';
+  }, 60000); // Stop after 1 minute
+  recognition.onresult = function (event) {
+    clearTimeout(recordingTimer);
+    timerDisplay.textContent = '';
+    const spoken = event.results[0][0].transcript;
+    analyzeSpeech(spoken);
+  };
+  recognition.onerror = function (ev) {
+    clearTimeout(recordingTimer);
+    timerDisplay.textContent = '';
+    console.error('Speech recognition error', ev);
+    resultDiv.textContent = 'Speech recognition error: ' + (ev.error || 'unknown');
+  };
+  recognition.onend = function () {
+    clearTimeout(recordingTimer);
+    if (resultDiv.textContent === 'Speaking… Talk about the topic for 1 minute.') {
+      resultDiv.textContent = 'Recording stopped. Click Speak Now to try again.';
+    }
+  };
+  // Update timer display
+  recordingTimerDisplay = setInterval(() => {
+    timeLeft--;
+    timerDisplay.textContent = `Speaking Time: ${timeLeft} seconds`;
+    if (timeLeft <= 0) {
+      clearInterval(recordingTimerDisplay);
+    }
+  }, 1000);
+}
+function analyzeSpeech(userSpeech) {
+  if (!currentTopic) {
+    resultDiv.textContent = 'No topic to analyze. Click Next Topic.';
+    return;
+  }
+  const spoken = normalize(userSpeech || '');
+  const relevance = topicRelevanceScore(spoken, currentTopic.keywords);
+  resultDiv.innerHTML = `<b>You said:</b> ${escapeHtml(userSpeech)}<br><b>Topic Relevance:</b> ${relevance.toFixed(1)}%`;
+}
+function normalize(s) {
+  return s.toLowerCase().replace(/[^\w\s']/g, '').replace(/\s+/g, ' ').trim();
+}
+function topicRelevanceScore(spoken, keywords) {
+  const words = spoken.split(' ').filter(Boolean);
+  if (words.length === 0) return 0;
+  let matches = 0;
+  const keywordSet = new Set(keywords.map(k => k.toLowerCase()));
+  words.forEach(w => { if (keywordSet.has(w)) matches++; });
+  return (matches / words.length) * 100; // Percentage of spoken words that are relevant
+}
+function clearTimers() {
+  if (preparationTimer) clearInterval(preparationTimer);
+  if (recordingTimer) clearTimeout(recordingTimer);
+  if (recordingTimerDisplay) clearInterval(recordingTimerDisplay);
+}
+function logDebug(msg) {
+  debugPre.textContent += msg + '\n';
+  document.getElementById('debug').style.display = 'block';
+}
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/[&<>"']/g, s => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[s]));
+}
+</script>
+</body>
+</html>
