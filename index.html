@@ -36,21 +36,17 @@
 <script>
 /*
  Robust topic loader:
-  - Uses predefined topics with keywords
-  - Stores a pool in localStorage
-  - Falls back to embedded list
+  - Fetches topics from an external API (JSONPlaceholder as mock)
+  - Stores a pool in localStorage for offline fallback
+  - Falls back to embedded list if API and cache fail
 */
 const POOL_KEY = 'jam_topic_pool_v1';
 const POOL_SIZE = 8;
+const API_URL = 'https://jsonplaceholder.typicode.com/posts'; // Mock API; replace with your endpoint
 const fallbackTopics = [
   { topic: "Your favorite hobby", keywords: ["hobby", "favorite", "activity", "enjoy", "pastime", "interest", "fun"] },
   { topic: "Why you love traveling", keywords: ["travel", "journey", "explore", "adventure", "destination", "culture", "trip"] },
-  { topic: "The importance of teamwork", keywords: ["team", "teamwork", "collaboration", "group", "cooperation", "together"] },
-  { topic: "Your favorite book", keywords: ["book", "read", "story", "novel", "author", "literature", "favorite"] },
-  { topic: "The impact of technology", keywords: ["technology", "tech", "innovation", "digital", "modern", "device", "internet"] },
-  { topic: "A memorable childhood moment", keywords: ["childhood", "memory", "moment", "kid", "young", "remember", "experience"] },
-  { topic: "Why health is important", keywords: ["health", "healthy", "fitness", "wellness", "exercise", "diet", "well-being"] },
-  { topic: "Your dream career", keywords: ["career", "job", "dream", "profession", "work", "goal", "aspiration"] }
+  { topic: "The importance of teamwork", keywords: ["team", "teamwork", "collaboration", "group", "cooperation", "together"] }
 ];
 let pool = [];
 let currentTopic = null; // { topic: string, keywords: string[] }
@@ -66,41 +62,102 @@ const startBtn = document.getElementById('startBtn');
 document.getElementById('nextBtn').addEventListener('click', loadTopic);
 startBtn.addEventListener('click', startPreparation);
 speakBtn.addEventListener('click', startSpeaking);
+
 init();
+
 async function init() {
+  console.log('Initializing...');
+  // Load cached topics from localStorage, if available
   const stored = localStorage.getItem(POOL_KEY);
   if (stored) {
-    try { pool = JSON.parse(stored); } catch(e) { pool = []; }
+    try {
+      pool = JSON.parse(stored);
+      console.log('Loaded pool from localStorage:', pool.length, 'topics');
+    } catch (e) {
+      pool = [];
+      console.error('Failed to parse stored pool:', e);
+    }
   }
+  // Fetch fresh topics from API
+  await fetchTopics();
+  // If pool is still empty, use fallbackTopics
   if (!pool || pool.length < 1) {
     pool = [...fallbackTopics];
     localStorage.setItem(POOL_KEY, JSON.stringify(pool));
-    console.log('Initialized pool with ' + pool.length + ' topics'); // Log to console instead of UI
+    console.log('Initialized pool with fallback topics:', pool.length);
   }
   loadTopic();
 }
+
+async function fetchTopics() {
+  console.log('Fetching topics from API...');
+  try {
+    const response = await fetch(API_URL, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        // Uncomment and add API key if required
+        // 'Authorization': 'Bearer YOUR_API_KEY'
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+    const data = await response.json();
+    // Transform JSONPlaceholder data to match { topic, keywords } format
+    // JSONPlaceholder returns { id, title, body, userId }
+    pool = data.slice(0, POOL_SIZE).map(item => ({
+      topic: item.title, // Use post title as topic
+      keywords: item.body.split(' ').slice(0, 5).map(word => word.toLowerCase().replace(/[^\w]/g, '')) // Extract first 5 words as keywords
+    }));
+    // Validate transformed data
+    if (!pool.every(item => item.topic && Array.isArray(item.keywords))) {
+      throw new Error('Invalid API response format after transformation');
+    }
+    localStorage.setItem(POOL_KEY, JSON.stringify(pool)); // Cache topics
+    console.log('Fetched and cached', pool.length, 'topics from API');
+  } catch (err) {
+    console.error('fetchTopics error:', err);
+    resultDiv.textContent = 'Failed to fetch topics from API. Using cached or fallback topics.';
+  }
+}
+
 async function loadTopic() {
+  console.log('Loading topic...');
   clearTimers();
   resultDiv.textContent = '';
   timerDisplay.textContent = '';
-  topicBox.textContent = '';
+  topicBox.textContent = 'Loading topic...';
   speakBtn.disabled = true;
-  startBtn.disabled = true; // Disable until topic is confirmed loaded
-  try {
+  startBtn.disabled = true;
+
+  // Ensure pool is populated
+  if (pool.length === 0) {
+    await fetchTopics(); // Try fetching again
     if (pool.length === 0) {
-      pool = [...fallbackTopics];
+      pool = [...fallbackTopics]; // Fallback to hardcoded topics
+      localStorage.setItem(POOL_KEY, JSON.stringify(pool));
+      console.log('Repopulated empty pool with fallback topics:', pool.length);
     }
-    currentTopic = pool[Math.floor(Math.random() * pool.length)]; // Random topic from pool
-    topicBox.textContent = currentTopic.topic;
-    startBtn.disabled = false; // Enable only after topic is loaded
+  }
+
+  try {
+    currentTopic = pool[Math.floor(Math.random() * pool.length)];
+    console.log('Selected topic:', currentTopic.topic);
+    if (topicBox) {
+      topicBox.textContent = currentTopic.topic;
+    } else {
+      console.error('topicBox element not found!');
+    }
+    startBtn.disabled = false;
     resultDiv.textContent = 'Topic loaded. Click Start Preparation to begin.';
-    return;
   } catch (err) {
     console.error('loadTopic error:', err);
     topicBox.textContent = 'Error loading topic.';
     resultDiv.textContent = 'Failed to load topic. Click Next Topic to retry.';
   }
 }
+
 function startPreparation() {
   if (!currentTopic) {
     resultDiv.textContent = 'No topic loaded. Click Next Topic.';
@@ -122,6 +179,7 @@ function startPreparation() {
   }, 1000);
   resultDiv.textContent = 'Prepare your thoughts for 1 minute!';
 }
+
 function startSpeaking() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -135,10 +193,10 @@ function startSpeaking() {
     return;
   }
   clearTimers();
-  window.speechSynthesis.cancel(); // Stop any speech synthesis
+  window.speechSynthesis.cancel();
   resultDiv.textContent = 'Speaking… Talk about the topic for 1 minute.';
   timerDisplay.textContent = 'Speaking Time: 60 seconds';
-  let timeLeft = 60; // 1 minute speaking
+  let timeLeft = 60;
   const recognition = new SpeechRecognition();
   recognition.lang = 'en-US';
   recognition.interimResults = false;
@@ -148,7 +206,7 @@ function startSpeaking() {
     recognition.stop();
     timerDisplay.textContent = '';
     resultDiv.textContent = 'Recording stopped. Analyzing…';
-  }, 60000); // Stop after 1 minute
+  }, 60000);
   recognition.onresult = function (event) {
     clearTimeout(recordingTimer);
     timerDisplay.textContent = '';
@@ -167,7 +225,6 @@ function startSpeaking() {
       resultDiv.textContent = 'Recording stopped. Click Speak Now to try again.';
     }
   };
-  // Update timer display
   recordingTimerDisplay = setInterval(() => {
     timeLeft--;
     timerDisplay.textContent = `Speaking Time: ${timeLeft} seconds`;
@@ -176,6 +233,7 @@ function startSpeaking() {
     }
   }, 1000);
 }
+
 function analyzeSpeech(userSpeech) {
   if (!currentTopic) {
     resultDiv.textContent = 'No topic to analyze. Click Next Topic.';
@@ -185,32 +243,39 @@ function analyzeSpeech(userSpeech) {
   const relevance = topicRelevanceScore(spoken, currentTopic.keywords);
   resultDiv.innerHTML = `<b>You said:</b> ${escapeHtml(userSpeech)}<br><b>Topic Relevance:</b> ${relevance.toFixed(1)}%`;
 }
+
 function normalize(s) {
   return s.toLowerCase().replace(/[^\w\s']/g, '').replace(/\s+/g, ' ').trim();
 }
+
 function topicRelevanceScore(spoken, keywords) {
   const words = spoken.split(' ').filter(Boolean);
   if (words.length === 0) return 0;
   let matches = 0;
   const keywordSet = new Set(keywords.map(k => k.toLowerCase()));
   words.forEach(w => { if (keywordSet.has(w)) matches++; });
-  return (matches / words.length) * 100; // Percentage of spoken words that are relevant
+  return (matches / words.length) * 100;
 }
+
 function clearTimers() {
   if (preparationTimer) clearInterval(preparationTimer);
   if (recordingTimer) clearTimeout(recordingTimer);
   if (recordingTimerDisplay) clearInterval(recordingTimerDisplay);
 }
+
 function logDebug(msg) {
   debugPre.textContent += msg + '\n';
-  // Only show debug if explicitly needed (e.g., via console or UI toggle)
-  // For now, log to console instead
-  console.log(msg);
+  console.log(msg); // Log to console for debugging
 }
+
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/[&<>"']/g, s => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
   }[s]));
 }
 </script>
